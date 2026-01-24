@@ -31,9 +31,9 @@ FROM eclipse-temurin:21-jre-alpine
 LABEL org.opencontainers.image.title="Spring STAC API Server"
 LABEL org.opencontainers.image.description="STAC API v1.0.0 compliant server built with Spring Boot"
 LABEL org.opencontainers.image.version="1.0.0"
-LABEL org.opencontainers.image.vendor="Spring STAC Project"
-LABEL org.opencontainers.image.source="https://github.com/spring-stac/spring-stac"
-LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="exergy-dev"
+LABEL org.opencontainers.image.source="https://github.com/exergy-dev/spring-stac"
+LABEL org.opencontainers.image.licenses="MIT"
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S stac && \
