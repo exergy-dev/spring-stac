@@ -1,0 +1,21 @@
+spring:
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    username: ${ELASTICSEARCH_USERNAME:}
+    password: ${ELASTICSEARCH_PASSWORD:}
+    connection-timeout: 5s
+    socket-timeout: 30s
+
+stac:
+  repository:
+    type: elasticsearch
+  elasticsearch:
+    index-prefix: stac
+    items-index-pattern: stac-items-*
+    collections-index: stac-collections
+    number-of-shards: 3
+    number-of-replicas: 1
+
+logging:
+  level:
+    org.stac.repository.elasticsearch: DEBUG

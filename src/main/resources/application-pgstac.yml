@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/stac}
+    username: ${SPRING_DATASOURCE_USERNAME:stac}
+    password: ${SPRING_DATASOURCE_PASSWORD:stac}
+
+stac:
+  repository:
+    type: pgstac
+
+logging:
+  level:
+    org.stac.repository.pgstac: DEBUG

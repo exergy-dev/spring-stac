@@ -1,0 +1,125 @@
+# Docker Compose configuration for Spring STAC API Server
+# Supports both pgSTAC (PostgreSQL) and Elasticsearch backends
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # STAC API Server
+  # =============================================================================
+  stac-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stac-server
+    ports:
+      - "8080:8080"
+    environment:
+      # Spring profile: 'pgstac' or 'elasticsearch'
+      SPRING_PROFILES_ACTIVE: pgstac
+
+      # PostgreSQL/pgSTAC connection
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/stac
+      SPRING_DATASOURCE_USERNAME: stac
+      SPRING_DATASOURCE_PASSWORD: stac_password
+
+      # Disable Elasticsearch auto-configuration when using pgstac
+      SPRING_AUTOCONFIGURE_EXCLUDE: org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration,org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchClientAutoConfiguration
+
+      # JVM options for container environment
+      JAVA_OPTS: "-XX:+UseZGC -XX:MaxRAMPercentage=75.0"
+
+      # STAC API configuration
+      STAC_API_TITLE: "Spring STAC API"
+      STAC_API_DESCRIPTION: "STAC API v1.0.0 compliant server"
+      STAC_API_ROOT_URL: "http://localhost:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - stac-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # PostgreSQL with PostGIS and pgSTAC
+  # =============================================================================
+  postgres:
+    image: ghcr.io/stac-utils/pgstac:v0.8.6
+    container_name: stac-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: stac
+      POSTGRES_USER: stac
+      POSTGRES_PASSWORD: stac_password
+      PGUSER: stac
+      PGPASSWORD: stac_password
+      PGDATABASE: stac
+    volumes:
+      # Persistent data storage
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stac -d stac"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - stac-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # Elasticsearch (Optional - for elasticsearch profile)
+  # =============================================================================
+  elasticsearch:
+    image: elasticsearch:8.11.4
+    container_name: stac-elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      # Single-node development configuration
+      discovery.type: single-node
+      # Disable security for development (enable in production)
+      xpack.security.enabled: "false"
+      # Memory settings
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+      # Cluster name
+      cluster.name: stac-cluster
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - stac-network
+    restart: unless-stopped
+    # Uncomment to enable this service (disabled by default to save resources)
+    profiles:
+      - elasticsearch
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  stac-network:
+    driver: bridge
+    name: stac-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres-data:
+    name: stac-postgres-data
+  elasticsearch-data:
+    name: stac-elasticsearch-data
