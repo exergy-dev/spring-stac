@@ -23,7 +23,6 @@ repositories {
 
 val jtsVersion = "1.20.0"
 val geotoolsVersion = "31.0"
-val jts2geojsonVersion = "0.18.1"
 val elasticsearchVersion = "8.11.4"
 val opensearchVersion = "2.8.0"
 val springdocVersion = "2.3.0"
@@ -52,6 +51,7 @@ dependencies {
 
     // JTS Geometry
     implementation("org.locationtech.jts:jts-core:$jtsVersion")
+    implementation("org.locationtech.jts.io:jts-io-common:$jtsVersion")
 
     // GeoTools
     implementation("org.geotools:gt-api:$geotoolsVersion")
@@ -59,9 +59,6 @@ dependencies {
     implementation("org.geotools:gt-cql:$geotoolsVersion")
     implementation("org.geotools:gt-geojson:$geotoolsVersion")
     runtimeOnly("org.geotools:gt-epsg-hsql:$geotoolsVersion")
-
-    // GeoJSON
-    implementation("org.wololo:jts2geojson:$jts2geojsonVersion")
 
     // Jackson
     implementation("com.fasterxml.jackson.core:jackson-databind")

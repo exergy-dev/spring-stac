@@ -1,5 +1,6 @@
 package org.stac.service;
 
+import org.stac.util.JtsModule;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +26,7 @@ class Cql2FilterParserTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JtsModule());
         parser = new Cql2FilterParser(objectMapper);
     }
 

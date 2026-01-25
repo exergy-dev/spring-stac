@@ -1,5 +1,6 @@
 package org.stac.service;
 
+import org.stac.util.JtsModule;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +28,7 @@ class JsonMergePatchServiceTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JtsModule());
         jsonMergePatchService = new JsonMergePatchService(objectMapper);
     }
 
