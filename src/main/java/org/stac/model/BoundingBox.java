@@ -94,6 +94,30 @@ public class BoundingBox {
     }
 
     /**
+     * Parses a bounding box string directly to a double array.
+     * <p>
+     * This is a convenience method for cases where a raw array is needed
+     * instead of a typed BoundingBox object. Returns null for null/empty input
+     * rather than throwing an exception.
+     *
+     * @param bbox comma-separated string of coordinates (e.g., "-180,-90,180,90")
+     * @return double array of coordinates, or null if input is null/empty
+     * @throws NumberFormatException if coordinates cannot be parsed
+     */
+    public static double[] parseToArray(String bbox) {
+        if (bbox == null || bbox.isBlank()) {
+            return null;
+        }
+
+        String[] parts = bbox.split(",");
+        double[] bboxArray = new double[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            bboxArray[i] = Double.parseDouble(parts[i].trim());
+        }
+        return bboxArray;
+    }
+
+    /**
      * Parses a bounding box from a comma-separated string.
      * <p>
      * Accepts either 4 values (2D: west,south,east,north) or

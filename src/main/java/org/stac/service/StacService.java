@@ -12,16 +12,19 @@ import org.stac.exception.ConflictException;
 import org.stac.exception.NotFoundException;
 import org.stac.model.*;
 import org.stac.model.AggregationResponse;
+import org.stac.model.aggregation.Aggregation;
+import org.stac.model.aggregation.Bucket;
 import org.stac.repository.StacRepository;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.locationtech.jts.geom.Geometry;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Main service layer for STAC API operations.
@@ -38,6 +41,8 @@ public class StacService {
     private final Cql2FilterParser cql2FilterParser;
     private final ValidationService validationService;
     private final JsonMergePatchService jsonMergePatchService;
+    private final LinkBuilder linkBuilder;
+    private final ObjectMapper objectMapper;
 
     @Value("${stac.api.root-url:http://localhost:8080}")
     private String rootUrl;
@@ -56,6 +61,11 @@ public class StacService {
 
     @Value("${stac.api.id:stac-api}")
     private String apiId;
+
+    // STAC Constants
+    private static final String STAC_VERSION = "1.0.0";
+    private static final String CATALOG_TYPE = "Catalog";
+    private static final String FEATURE_COLLECTION_TYPE = "FeatureCollection";
 
     /**
      * Standard STAC API conformance classes.
@@ -184,8 +194,8 @@ public class StacService {
 
         return LandingPage.builder()
                 .id(apiId)
-                .type("Catalog")
-                .stacVersion("1.0.0")
+                .type(CATALOG_TYPE)
+                .stacVersion(STAC_VERSION)
                 .title(apiTitle)
                 .description(apiDescription)
                 .conformsTo(CONFORMANCE_CLASSES)
@@ -224,37 +234,12 @@ public class StacService {
         Page<Collection> page = stacRepository.findAllCollections(pageable);
 
         List<Collection> collections = page.getContent().stream()
-                .map(this::addCollectionLinks)
-                .collect(Collectors.toList());
-
-        List<Link> links = new ArrayList<>();
-        links.add(Link.builder()
-                .href(rootUrl + "/collections")
-                .rel("self")
-                .type("application/json")
-                .title("Collections")
-                .build());
-
-        links.add(Link.builder()
-                .href(rootUrl)
-                .rel("root")
-                .type("application/json")
-                .title("Root catalog")
-                .build());
-
-        // Pagination links
-        if (page.hasNext()) {
-            links.add(Link.builder()
-                    .href(rootUrl + "/collections?limit=" + effectiveLimit + "&offset=" + (page.getNumber() + 1) * effectiveLimit)
-                    .rel("next")
-                    .type("application/json")
-                    .title("Next page")
-                    .build());
-        }
+                .map(linkBuilder::addCollectionLinks)
+                .toList();
 
         return Collections.builder()
                 .collections(collections)
-                .links(links)
+                .links(linkBuilder.buildCollectionsLinks(page, effectiveLimit))
                 .build();
     }
 
@@ -270,7 +255,7 @@ public class StacService {
         log.debug("Getting collection: {}", id);
 
         return stacRepository.findCollectionById(id)
-                .map(this::addCollectionLinks)
+                .map(linkBuilder::addCollectionLinks)
                 .orElseThrow(() -> NotFoundException.collection(id));
     }
 
@@ -294,7 +279,7 @@ public class StacService {
 
         // Save and return with links
         Collection savedCollection = stacRepository.saveCollection(collection);
-        return addCollectionLinks(savedCollection);
+        return linkBuilder.addCollectionLinks(savedCollection);
     }
 
     /**
@@ -321,7 +306,7 @@ public class StacService {
 
         // Save and return with links
         Collection savedCollection = stacRepository.saveCollection(collection);
-        return addCollectionLinks(savedCollection);
+        return linkBuilder.addCollectionLinks(savedCollection);
     }
 
     /**
@@ -364,7 +349,7 @@ public class StacService {
 
         // Save and return with links
         Collection savedCollection = stacRepository.saveCollection(patched);
-        return addCollectionLinks(savedCollection);
+        return linkBuilder.addCollectionLinks(savedCollection);
     }
 
     // ========================================================================
@@ -395,15 +380,13 @@ public class StacService {
         Page<Item> page = stacRepository.findItemsByCollection(collectionId, criteria, pageable);
 
         List<Item> items = page.getContent().stream()
-                .map(item -> addItemLinks(item, collectionId))
-                .collect(Collectors.toList());
-
-        List<Link> links = buildItemCollectionLinks(collectionId, page, effectiveLimit);
+                .map(item -> linkBuilder.addItemLinks(item, collectionId))
+                .toList();
 
         return ItemCollection.builder()
-                .type("FeatureCollection")
+                .type(FEATURE_COLLECTION_TYPE)
                 .features(items)
-                .links(links)
+                .links(linkBuilder.buildItemCollectionLinks(collectionId, page, effectiveLimit))
                 .context(Context.builder()
                         .returned(items.size())
                         .limit(effectiveLimit)
@@ -427,7 +410,7 @@ public class StacService {
         log.debug("Getting item: {} from collection: {}", itemId, collectionId);
 
         return stacRepository.findItemById(collectionId, itemId)
-                .map(item -> addItemLinks(item, collectionId))
+                .map(item -> linkBuilder.addItemLinks(item, collectionId))
                 .orElseThrow(() -> NotFoundException.item(collectionId, itemId));
     }
 
@@ -457,13 +440,13 @@ public class StacService {
         // Add links to items
         if (result.getFeatures() != null) {
             List<Item> itemsWithLinks = result.getFeatures().stream()
-                    .map(item -> addItemLinks(item, item.getCollection()))
-                    .collect(Collectors.toList());
+                    .map(item -> linkBuilder.addItemLinks(item, item.getCollection()))
+                    .toList();
             result.setFeatures(itemsWithLinks);
         }
 
         // Add search result links
-        result.setLinks(buildSearchResultLinks(request, result));
+        result.setLinks(linkBuilder.buildSearchResultLinks(request, result));
         result.setTimeStamp(Instant.now().toString());
 
         return result;
@@ -490,34 +473,19 @@ public class StacService {
         Map<String, Object> rawResults = stacRepository.aggregate(request);
 
         // Convert to AggregationResponse format
-        List<AggregationResponse.Aggregation> aggregations = new ArrayList<>();
+        List<Aggregation> aggregations = new ArrayList<>();
 
         for (String field : request.getAggregations()) {
             Object result = rawResults.get(field);
-            AggregationResponse.Aggregation agg = buildAggregation(field, result);
+            Aggregation agg = buildAggregation(field, result);
             if (agg != null) {
                 aggregations.add(agg);
             }
         }
 
-        // Build links
-        List<Link> links = new ArrayList<>();
-        links.add(Link.builder()
-                .href(rootUrl + "/aggregate")
-                .rel("self")
-                .type("application/json")
-                .title("Aggregation results")
-                .build());
-        links.add(Link.builder()
-                .href(rootUrl)
-                .rel("root")
-                .type("application/json")
-                .title("Root catalog")
-                .build());
-
         return AggregationResponse.builder()
                 .aggregations(aggregations)
-                .links(links)
+                .links(linkBuilder.buildAggregationLinks())
                 .build();
     }
 
@@ -525,75 +493,75 @@ public class StacService {
      * Builds an Aggregation object from raw repository results.
      */
     @SuppressWarnings("unchecked")
-    private AggregationResponse.Aggregation buildAggregation(String field, Object result) {
+    private Aggregation buildAggregation(String field, Object result) {
         if (result == null) {
             return null;
         }
 
-        AggregationResponse.Aggregation.AggregationBuilder builder =
-                AggregationResponse.Aggregation.builder().name(field);
+        var builder = Aggregation.builder().name(field);
 
-        if (result instanceof Map) {
-            Map<String, Object> resultMap = (Map<String, Object>) result;
-
+        if (result instanceof Map<?, ?> resultMap) {
             // Handle different aggregation result types
             if (resultMap.containsKey("buckets")) {
                 // Term aggregation
                 builder.dataType("string");
+                @SuppressWarnings("unchecked")
                 List<Map<String, Object>> rawBuckets = (List<Map<String, Object>>) resultMap.get("buckets");
-                List<AggregationResponse.Bucket> buckets = rawBuckets.stream()
-                        .map(b -> AggregationResponse.Bucket.builder()
+                List<Bucket> buckets = rawBuckets.stream()
+                        .map(b -> Bucket.builder()
                                 .key(b.get("key"))
                                 .frequency(((Number) b.getOrDefault("count", b.getOrDefault("doc_count", 0))).longValue())
                                 .count(((Number) b.getOrDefault("count", b.getOrDefault("doc_count", 0))).longValue())
                                 .build())
-                        .collect(Collectors.toList());
+                        .toList();
                 builder.buckets(buckets);
             } else if (resultMap.containsKey("min") || resultMap.containsKey("max")) {
                 // Numeric statistics
                 builder.dataType("numeric");
-                if (resultMap.containsKey("min")) {
-                    builder.minimum((Number) resultMap.get("min"));
+                if (resultMap.get("min") instanceof Number min) {
+                    builder.minimum(min);
                 }
-                if (resultMap.containsKey("max")) {
-                    builder.maximum((Number) resultMap.get("max"));
+                if (resultMap.get("max") instanceof Number max) {
+                    builder.maximum(max);
                 }
-                if (resultMap.containsKey("avg")) {
-                    builder.average((Number) resultMap.get("avg"));
+                if (resultMap.get("avg") instanceof Number avg) {
+                    builder.average(avg);
                 }
-                if (resultMap.containsKey("sum")) {
-                    builder.sum((Number) resultMap.get("sum"));
+                if (resultMap.get("sum") instanceof Number sum) {
+                    builder.sum(sum);
                 }
-                if (resultMap.containsKey("count")) {
-                    builder.count(((Number) resultMap.get("count")).longValue());
+                if (resultMap.get("count") instanceof Number count) {
+                    builder.count(count.longValue());
                 }
             } else if (resultMap.containsKey("bounds")) {
                 // Geometry bounds
                 builder.dataType("geometry");
                 Object boundsObj = resultMap.get("bounds");
-                if (boundsObj instanceof double[]) {
-                    builder.bounds((double[]) boundsObj);
-                } else if (boundsObj instanceof List) {
-                    List<Number> boundsList = (List<Number>) boundsObj;
-                    builder.bounds(boundsList.stream().mapToDouble(Number::doubleValue).toArray());
+                if (boundsObj instanceof double[] boundsArray) {
+                    builder.bounds(boundsArray);
+                } else if (boundsObj instanceof List<?> boundsList) {
+                    @SuppressWarnings("unchecked")
+                    List<Number> boundsNumbers = (List<Number>) boundsList;
+                    builder.bounds(boundsNumbers.stream().mapToDouble(Number::doubleValue).toArray());
                 }
             }
-        } else if (result instanceof List) {
+        } else if (result instanceof List<?> rawBuckets) {
             // Bucket list directly
             builder.dataType("string");
-            List<Map<String, Object>> rawBuckets = (List<Map<String, Object>>) result;
-            List<AggregationResponse.Bucket> buckets = rawBuckets.stream()
-                    .map(b -> AggregationResponse.Bucket.builder()
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> bucketMaps = (List<Map<String, Object>>) rawBuckets;
+            List<Bucket> buckets = bucketMaps.stream()
+                    .map(b -> Bucket.builder()
                             .key(b.get("key"))
                             .frequency(((Number) b.getOrDefault("count", 0)).longValue())
                             .count(((Number) b.getOrDefault("count", 0)).longValue())
                             .build())
-                    .collect(Collectors.toList());
+                    .toList();
             builder.buckets(buckets);
-        } else if (result instanceof Number) {
+        } else if (result instanceof Number num) {
             // Simple count
             builder.dataType("numeric");
-            builder.count(((Number) result).longValue());
+            builder.count(num.longValue());
         }
 
         return builder.build();
@@ -627,7 +595,7 @@ public class StacService {
 
         // Save and return with links
         Item savedItem = stacRepository.saveItem(collectionId, item);
-        return addItemLinks(savedItem, collectionId);
+        return linkBuilder.addItemLinks(savedItem, collectionId);
     }
 
     /**
@@ -659,7 +627,7 @@ public class StacService {
 
         // Save and return with links
         Item savedItem = stacRepository.saveItem(collectionId, item);
-        return addItemLinks(savedItem, collectionId);
+        return linkBuilder.addItemLinks(savedItem, collectionId);
     }
 
     /**
@@ -708,7 +676,7 @@ public class StacService {
 
         // Save and return with links
         Item savedItem = stacRepository.saveItem(collectionId, patched);
-        return addItemLinks(savedItem, collectionId);
+        return linkBuilder.addItemLinks(savedItem, collectionId);
     }
 
     /**
@@ -758,7 +726,7 @@ public class StacService {
             case "delete" -> {
                 List<String> itemIds = items.stream()
                         .map(Item::getId)
-                        .collect(Collectors.toList());
+                        .toList();
                 yield stacRepository.bulkDelete(collectionId, itemIds);
             }
             default -> stacRepository.bulkUpdate(collectionId, items); // "upsert" or default
@@ -853,9 +821,8 @@ public class StacService {
         // Intersects geometry
         if (request.getIntersects() != null && !request.getIntersects().isBlank()) {
             try {
-                org.wololo.geojson.GeoJSON geoJson = org.wololo.geojson.GeoJSONFactory.create(request.getIntersects());
-                org.wololo.jts2geojson.GeoJSONReader reader = new org.wololo.jts2geojson.GeoJSONReader();
-                builder.intersects(reader.read(geoJson));
+                Geometry geometry = objectMapper.readValue(request.getIntersects(), Geometry.class);
+                builder.intersects(geometry);
             } catch (Exception e) {
                 log.warn("Failed to parse intersects geometry: {}", request.getIntersects(), e);
             }
@@ -883,7 +850,7 @@ public class StacService {
         if (request.getSortby() != null && !request.getSortby().isEmpty()) {
             List<SortBy> sortBy = request.getSortby().stream()
                     .map(SortBy::fromString)
-                    .collect(Collectors.toList());
+                    .toList();
             builder.sortBy(sortBy);
         }
 
@@ -921,185 +888,4 @@ public class StacService {
                 .build();
     }
 
-    /**
-     * Adds standard STAC links to a Collection.
-     */
-    private Collection addCollectionLinks(Collection collection) {
-        List<Link> links = new ArrayList<>();
-
-        if (collection.getLinks() != null) {
-            links.addAll(collection.getLinks());
-        }
-
-        // Self link
-        links.add(Link.builder()
-                .href(rootUrl + "/collections/" + collection.getId())
-                .rel("self")
-                .type("application/json")
-                .title("This collection")
-                .build());
-
-        // Root link
-        links.add(Link.builder()
-                .href(rootUrl)
-                .rel("root")
-                .type("application/json")
-                .title("Root catalog")
-                .build());
-
-        // Parent link
-        links.add(Link.builder()
-                .href(rootUrl)
-                .rel("parent")
-                .type("application/json")
-                .title("Parent catalog")
-                .build());
-
-        // Items link
-        links.add(Link.builder()
-                .href(rootUrl + "/collections/" + collection.getId() + "/items")
-                .rel("items")
-                .type("application/geo+json")
-                .title("Items in this collection")
-                .build());
-
-        collection.setLinks(links);
-        return collection;
-    }
-
-    /**
-     * Adds standard STAC links to an Item.
-     */
-    private Item addItemLinks(Item item, String collectionId) {
-        List<Link> links = new ArrayList<>();
-
-        if (item.getLinks() != null) {
-            links.addAll(item.getLinks());
-        }
-
-        String effectiveCollectionId = collectionId != null ? collectionId : item.getCollection();
-
-        // Self link
-        links.add(Link.builder()
-                .href(rootUrl + "/collections/" + effectiveCollectionId + "/items/" + item.getId())
-                .rel("self")
-                .type("application/geo+json")
-                .title("This item")
-                .build());
-
-        // Root link
-        links.add(Link.builder()
-                .href(rootUrl)
-                .rel("root")
-                .type("application/json")
-                .title("Root catalog")
-                .build());
-
-        // Parent/collection link
-        links.add(Link.builder()
-                .href(rootUrl + "/collections/" + effectiveCollectionId)
-                .rel("parent")
-                .type("application/json")
-                .title("Parent collection")
-                .build());
-
-        links.add(Link.builder()
-                .href(rootUrl + "/collections/" + effectiveCollectionId)
-                .rel("collection")
-                .type("application/json")
-                .title("Collection")
-                .build());
-
-        item.setLinks(links);
-        return item;
-    }
-
-    private List<Link> buildItemCollectionLinks(String collectionId, Page<Item> page, int limit) {
-        List<Link> links = new ArrayList<>();
-
-        // Self link
-        links.add(Link.builder()
-                .href(rootUrl + "/collections/" + collectionId + "/items")
-                .rel("self")
-                .type("application/geo+json")
-                .title("Items in this collection")
-                .build());
-
-        // Root link
-        links.add(Link.builder()
-                .href(rootUrl)
-                .rel("root")
-                .type("application/json")
-                .title("Root catalog")
-                .build());
-
-        // Collection link
-        links.add(Link.builder()
-                .href(rootUrl + "/collections/" + collectionId)
-                .rel("collection")
-                .type("application/json")
-                .title("Collection")
-                .build());
-
-        // Pagination
-        if (page.hasNext()) {
-            links.add(Link.builder()
-                    .href(rootUrl + "/collections/" + collectionId + "/items?limit=" + limit +
-                          "&offset=" + (page.getNumber() + 1) * limit)
-                    .rel("next")
-                    .type("application/geo+json")
-                    .title("Next page")
-                    .build());
-        }
-
-        if (page.hasPrevious()) {
-            links.add(Link.builder()
-                    .href(rootUrl + "/collections/" + collectionId + "/items?limit=" + limit +
-                          "&offset=" + (page.getNumber() - 1) * limit)
-                    .rel("prev")
-                    .type("application/geo+json")
-                    .title("Previous page")
-                    .build());
-        }
-
-        return links;
-    }
-
-    private List<Link> buildSearchResultLinks(SearchRequest request, ItemCollection result) {
-        List<Link> links = new ArrayList<>();
-
-        // Self link
-        links.add(Link.builder()
-                .href(rootUrl + "/search")
-                .rel("self")
-                .type("application/geo+json")
-                .title("This search")
-                .build());
-
-        // Root link
-        links.add(Link.builder()
-                .href(rootUrl)
-                .rel("root")
-                .type("application/json")
-                .title("Root catalog")
-                .build());
-
-        // Next page link (if context indicates more results)
-        if (result.getContext() != null &&
-            result.getContext().getMatched() != null &&
-            result.getContext().getReturned() != null &&
-            result.getContext().getMatched() > result.getContext().getReturned()) {
-
-            // Build next link with POST body
-            links.add(Link.builder()
-                    .href(rootUrl + "/search")
-                    .rel("next")
-                    .type("application/geo+json")
-                    .title("Next page")
-                    .method("POST")
-                    .build());
-        }
-
-        return links;
-    }
 }

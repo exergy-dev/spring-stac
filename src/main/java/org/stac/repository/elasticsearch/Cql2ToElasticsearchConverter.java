@@ -1,7 +1,6 @@
 package org.stac.repository.elasticsearch;
 
 import co.elastic.clients.elasticsearch._types.GeoShapeRelation;
-import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.RangeQuery;
 import co.elastic.clients.json.JsonData;
@@ -10,7 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.locationtech.jts.geom.Geometry;
 import org.springframework.stereotype.Component;
 import org.stac.model.FilterCriteria;
-import org.stac.model.FilterType;
+import org.stac.util.GeometryConverter;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,6 +26,8 @@ import java.util.Map;
 @Component
 @RequiredArgsConstructor
 public class Cql2ToElasticsearchConverter {
+
+    private final GeometryConverter geometryConverter;
 
     /**
      * Converts a FilterCriteria to an Elasticsearch Query.
@@ -368,68 +369,9 @@ public class Cql2ToElasticsearchConverter {
         if (value instanceof Map) {
             return (Map<String, Object>) value;
         } else if (value instanceof Geometry geometry) {
-            return geometryToGeoJson(geometry);
+            return geometryConverter.toGeoJson(geometry);
         }
         throw new IllegalArgumentException("Cannot convert value to GeoJSON: " + value.getClass());
-    }
-
-    /**
-     * Converts a JTS Geometry to a GeoJSON Map.
-     */
-    private Map<String, Object> geometryToGeoJson(Geometry geometry) {
-        String type = geometry.getGeometryType();
-        List<Object> coordinates = extractCoordinates(geometry);
-
-        return Map.of(
-                "type", type,
-                "coordinates", coordinates
-        );
-    }
-
-    /**
-     * Extracts coordinates from a JTS Geometry.
-     */
-    private List<Object> extractCoordinates(Geometry geometry) {
-        List<Object> coords = new ArrayList<>();
-        String type = geometry.getGeometryType();
-
-        switch (type) {
-            case "Point" -> {
-                coords.add(geometry.getCoordinate().x);
-                coords.add(geometry.getCoordinate().y);
-            }
-            case "LineString", "LinearRing" -> {
-                for (var coord : geometry.getCoordinates()) {
-                    coords.add(List.of(coord.x, coord.y));
-                }
-            }
-            case "Polygon" -> {
-                org.locationtech.jts.geom.Polygon polygon = (org.locationtech.jts.geom.Polygon) geometry;
-                List<Object> rings = new ArrayList<>();
-                // Exterior ring
-                List<List<Double>> exteriorCoords = new ArrayList<>();
-                for (var coord : polygon.getExteriorRing().getCoordinates()) {
-                    exteriorCoords.add(List.of(coord.x, coord.y));
-                }
-                rings.add(exteriorCoords);
-                // Interior rings (holes)
-                for (int i = 0; i < polygon.getNumInteriorRing(); i++) {
-                    List<List<Double>> holeCoords = new ArrayList<>();
-                    for (var coord : polygon.getInteriorRingN(i).getCoordinates()) {
-                        holeCoords.add(List.of(coord.x, coord.y));
-                    }
-                    rings.add(holeCoords);
-                }
-                return rings;
-            }
-            case "MultiPoint", "MultiLineString", "MultiPolygon", "GeometryCollection" -> {
-                for (int i = 0; i < geometry.getNumGeometries(); i++) {
-                    coords.add(extractCoordinates(geometry.getGeometryN(i)));
-                }
-            }
-        }
-
-        return coords;
     }
 
     /**

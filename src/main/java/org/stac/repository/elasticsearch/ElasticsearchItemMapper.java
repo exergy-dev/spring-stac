@@ -1,23 +1,18 @@
 package org.stac.repository.elasticsearch;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Geometry;
-import org.locationtech.jts.geom.GeometryFactory;
-import org.locationtech.jts.geom.LinearRing;
-import org.locationtech.jts.geom.PrecisionModel;
 import org.springframework.stereotype.Component;
 import org.stac.model.Asset;
 import org.stac.model.Item;
 import org.stac.model.Link;
+import org.stac.util.GeometryConverter;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -34,7 +29,7 @@ import java.util.Map;
 public class ElasticsearchItemMapper {
 
     private final ObjectMapper objectMapper;
-    private final GeometryFactory geometryFactory = new GeometryFactory(new PrecisionModel(), 4326);
+    private final GeometryConverter geometryConverter;
 
     /**
      * Converts a STAC Item to an Elasticsearch document (Map).
@@ -58,7 +53,7 @@ public class ElasticsearchItemMapper {
 
         // Geometry in GeoJSON format for geo_shape field
         if (item.getGeometry() != null) {
-            doc.put("geometry", geometryToGeoJson(item.getGeometry()));
+            doc.put("geometry", geometryConverter.toGeoJson(item.getGeometry()));
         }
 
         // Bounding box
@@ -117,7 +112,7 @@ public class ElasticsearchItemMapper {
         // Geometry
         Object geometry = doc.get("geometry");
         if (geometry instanceof Map) {
-            builder.geometry(geoJsonToGeometry((Map<String, Object>) geometry));
+            builder.geometry(geometryConverter.fromGeoJson((Map<String, Object>) geometry));
         }
 
         // Bounding box
@@ -193,168 +188,6 @@ public class ElasticsearchItemMapper {
         // Convert ObjectNode to Map using ObjectMapper
         Map<String, Object> doc = objectMapper.convertValue(node, Map.class);
         return fromDocument(doc);
-    }
-
-    /**
-     * Converts a JTS Geometry to a GeoJSON Map.
-     */
-    private Map<String, Object> geometryToGeoJson(Geometry geometry) {
-        Map<String, Object> geoJson = new HashMap<>();
-        String type = geometry.getGeometryType();
-        geoJson.put("type", type);
-
-        switch (type) {
-            case "Point" -> {
-                Coordinate coord = geometry.getCoordinate();
-                geoJson.put("coordinates", List.of(coord.x, coord.y));
-            }
-            case "LineString" -> {
-                geoJson.put("coordinates", extractLineCoordinates(geometry));
-            }
-            case "Polygon" -> {
-                org.locationtech.jts.geom.Polygon polygon = (org.locationtech.jts.geom.Polygon) geometry;
-                List<List<List<Double>>> rings = new ArrayList<>();
-
-                // Exterior ring
-                rings.add(extractLineCoordinates(polygon.getExteriorRing()));
-
-                // Interior rings (holes)
-                for (int i = 0; i < polygon.getNumInteriorRing(); i++) {
-                    rings.add(extractLineCoordinates(polygon.getInteriorRingN(i)));
-                }
-                geoJson.put("coordinates", rings);
-            }
-            case "MultiPoint" -> {
-                List<List<Double>> coords = new ArrayList<>();
-                for (Coordinate coord : geometry.getCoordinates()) {
-                    coords.add(List.of(coord.x, coord.y));
-                }
-                geoJson.put("coordinates", coords);
-            }
-            case "MultiLineString" -> {
-                org.locationtech.jts.geom.MultiLineString mls = (org.locationtech.jts.geom.MultiLineString) geometry;
-                List<List<List<Double>>> lines = new ArrayList<>();
-                for (int i = 0; i < mls.getNumGeometries(); i++) {
-                    lines.add(extractLineCoordinates(mls.getGeometryN(i)));
-                }
-                geoJson.put("coordinates", lines);
-            }
-            case "MultiPolygon" -> {
-                org.locationtech.jts.geom.MultiPolygon mp = (org.locationtech.jts.geom.MultiPolygon) geometry;
-                List<List<List<List<Double>>>> polygons = new ArrayList<>();
-                for (int i = 0; i < mp.getNumGeometries(); i++) {
-                    org.locationtech.jts.geom.Polygon polygon = (org.locationtech.jts.geom.Polygon) mp.getGeometryN(i);
-                    List<List<List<Double>>> rings = new ArrayList<>();
-                    rings.add(extractLineCoordinates(polygon.getExteriorRing()));
-                    for (int j = 0; j < polygon.getNumInteriorRing(); j++) {
-                        rings.add(extractLineCoordinates(polygon.getInteriorRingN(j)));
-                    }
-                    polygons.add(rings);
-                }
-                geoJson.put("coordinates", polygons);
-            }
-            case "GeometryCollection" -> {
-                org.locationtech.jts.geom.GeometryCollection gc = (org.locationtech.jts.geom.GeometryCollection) geometry;
-                List<Map<String, Object>> geometries = new ArrayList<>();
-                for (int i = 0; i < gc.getNumGeometries(); i++) {
-                    geometries.add(geometryToGeoJson(gc.getGeometryN(i)));
-                }
-                geoJson.put("geometries", geometries);
-            }
-        }
-
-        return geoJson;
-    }
-
-    /**
-     * Extracts coordinates from a linear geometry.
-     */
-    private List<List<Double>> extractLineCoordinates(Geometry geometry) {
-        List<List<Double>> coords = new ArrayList<>();
-        for (Coordinate coord : geometry.getCoordinates()) {
-            coords.add(List.of(coord.x, coord.y));
-        }
-        return coords;
-    }
-
-    /**
-     * Converts a GeoJSON Map to a JTS Geometry.
-     */
-    @SuppressWarnings("unchecked")
-    private Geometry geoJsonToGeometry(Map<String, Object> geoJson) {
-        String type = (String) geoJson.get("type");
-        Object coords = geoJson.get("coordinates");
-
-        return switch (type) {
-            case "Point" -> {
-                List<Number> coord = (List<Number>) coords;
-                yield geometryFactory.createPoint(
-                        new Coordinate(coord.get(0).doubleValue(), coord.get(1).doubleValue()));
-            }
-            case "LineString" -> {
-                List<List<Number>> lineCoords = (List<List<Number>>) coords;
-                yield geometryFactory.createLineString(toCoordinateArray(lineCoords));
-            }
-            case "Polygon" -> {
-                List<List<List<Number>>> rings = (List<List<List<Number>>>) coords;
-                LinearRing shell = geometryFactory.createLinearRing(toCoordinateArray(rings.get(0)));
-                LinearRing[] holes = new LinearRing[rings.size() - 1];
-                for (int i = 1; i < rings.size(); i++) {
-                    holes[i - 1] = geometryFactory.createLinearRing(toCoordinateArray(rings.get(i)));
-                }
-                yield geometryFactory.createPolygon(shell, holes);
-            }
-            case "MultiPoint" -> {
-                List<List<Number>> points = (List<List<Number>>) coords;
-                Coordinate[] coordinates = toCoordinateArray(points);
-                yield geometryFactory.createMultiPointFromCoords(coordinates);
-            }
-            case "MultiLineString" -> {
-                List<List<List<Number>>> lines = (List<List<List<Number>>>) coords;
-                org.locationtech.jts.geom.LineString[] lineStrings =
-                        new org.locationtech.jts.geom.LineString[lines.size()];
-                for (int i = 0; i < lines.size(); i++) {
-                    lineStrings[i] = geometryFactory.createLineString(toCoordinateArray(lines.get(i)));
-                }
-                yield geometryFactory.createMultiLineString(lineStrings);
-            }
-            case "MultiPolygon" -> {
-                List<List<List<List<Number>>>> polygons = (List<List<List<List<Number>>>>) coords;
-                org.locationtech.jts.geom.Polygon[] polygonArray =
-                        new org.locationtech.jts.geom.Polygon[polygons.size()];
-                for (int i = 0; i < polygons.size(); i++) {
-                    List<List<List<Number>>> rings = polygons.get(i);
-                    LinearRing shell = geometryFactory.createLinearRing(toCoordinateArray(rings.get(0)));
-                    LinearRing[] holes = new LinearRing[rings.size() - 1];
-                    for (int j = 1; j < rings.size(); j++) {
-                        holes[j - 1] = geometryFactory.createLinearRing(toCoordinateArray(rings.get(j)));
-                    }
-                    polygonArray[i] = geometryFactory.createPolygon(shell, holes);
-                }
-                yield geometryFactory.createMultiPolygon(polygonArray);
-            }
-            case "GeometryCollection" -> {
-                List<Map<String, Object>> geometries = (List<Map<String, Object>>) geoJson.get("geometries");
-                Geometry[] geomArray = new Geometry[geometries.size()];
-                for (int i = 0; i < geometries.size(); i++) {
-                    geomArray[i] = geoJsonToGeometry(geometries.get(i));
-                }
-                yield geometryFactory.createGeometryCollection(geomArray);
-            }
-            default -> throw new IllegalArgumentException("Unsupported geometry type: " + type);
-        };
-    }
-
-    /**
-     * Converts a list of coordinate pairs to a Coordinate array.
-     */
-    private Coordinate[] toCoordinateArray(List<List<Number>> coords) {
-        Coordinate[] result = new Coordinate[coords.size()];
-        for (int i = 0; i < coords.size(); i++) {
-            List<Number> coord = coords.get(i);
-            result[i] = new Coordinate(coord.get(0).doubleValue(), coord.get(1).doubleValue());
-        }
-        return result;
     }
 
     /**

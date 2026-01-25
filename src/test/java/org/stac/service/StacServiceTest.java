@@ -26,6 +26,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.lenient;
 
 /**
  * Unit tests for StacService.
@@ -45,6 +46,9 @@ class StacServiceTest {
     @Mock
     private JsonMergePatchService jsonMergePatchService;
 
+    @Mock
+    private LinkBuilder linkBuilder;
+
     @InjectMocks
     private StacService stacService;
 
@@ -60,6 +64,45 @@ class StacServiceTest {
         ReflectionTestUtils.setField(stacService, "apiTitle", "STAC API");
         ReflectionTestUtils.setField(stacService, "apiDescription", "A STAC API implementation");
         ReflectionTestUtils.setField(stacService, "apiId", "stac-api");
+
+        // Setup LinkBuilder to return the same object with links added (lenient to avoid unnecessary stubbing errors)
+        lenient().when(linkBuilder.addCollectionLinks(any(Collection.class))).thenAnswer(invocation -> {
+            Collection col = invocation.getArgument(0);
+            col.setLinks(List.of(
+                    Link.builder().href(ROOT_URL + "/collections/" + col.getId()).rel("self").type("application/json").build(),
+                    Link.builder().href(ROOT_URL).rel("root").type("application/json").build(),
+                    Link.builder().href(ROOT_URL).rel("parent").type("application/json").build(),
+                    Link.builder().href(ROOT_URL + "/collections/" + col.getId() + "/items").rel("items").type("application/geo+json").build()
+            ));
+            return col;
+        });
+        lenient().when(linkBuilder.addItemLinks(any(Item.class), anyString())).thenAnswer(invocation -> {
+            Item item = invocation.getArgument(0);
+            String collectionId = invocation.getArgument(1);
+            item.setLinks(List.of(
+                    Link.builder().href(ROOT_URL + "/collections/" + collectionId + "/items/" + item.getId()).rel("self").type("application/geo+json").build(),
+                    Link.builder().href(ROOT_URL).rel("root").type("application/json").build(),
+                    Link.builder().href(ROOT_URL + "/collections/" + collectionId).rel("parent").type("application/json").build(),
+                    Link.builder().href(ROOT_URL + "/collections/" + collectionId).rel("collection").type("application/json").build()
+            ));
+            return item;
+        });
+        lenient().when(linkBuilder.buildCollectionsLinks(any(), anyInt())).thenReturn(List.of(
+                Link.builder().href(ROOT_URL + "/collections").rel("self").type("application/json").build(),
+                Link.builder().href(ROOT_URL).rel("root").type("application/json").build()
+        ));
+        lenient().when(linkBuilder.buildItemCollectionLinks(anyString(), any(), anyInt())).thenReturn(List.of(
+                Link.builder().href(ROOT_URL + "/collections/test-collection/items").rel("self").type("application/geo+json").build(),
+                Link.builder().href(ROOT_URL).rel("root").type("application/json").build()
+        ));
+        lenient().when(linkBuilder.buildSearchResultLinks(any(), any())).thenReturn(List.of(
+                Link.builder().href(ROOT_URL + "/search").rel("self").type("application/geo+json").build(),
+                Link.builder().href(ROOT_URL).rel("root").type("application/json").build()
+        ));
+        lenient().when(linkBuilder.buildAggregationLinks()).thenReturn(List.of(
+                Link.builder().href(ROOT_URL + "/aggregate").rel("self").type("application/json").build(),
+                Link.builder().href(ROOT_URL).rel("root").type("application/json").build()
+        ));
     }
 
     @Nested

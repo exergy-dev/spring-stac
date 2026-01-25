@@ -35,10 +35,6 @@ import org.geotools.api.filter.temporal.TEquals;
 import org.springframework.stereotype.Component;
 import org.stac.model.FilterCriteria;
 import org.stac.model.FilterType;
-import org.wololo.geojson.GeoJSON;
-import org.wololo.geojson.GeoJSONFactory;
-import org.wololo.jts2geojson.GeoJSONReader;
-import org.wololo.jts2geojson.GeoJSONWriter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,7 +42,7 @@ import java.util.List;
 /**
  * Parser for CQL2 filter expressions.
  * <p>
- * Uses GeoTools CQL library for CQL2-Text parsing and jts2geojson for GeoJSON handling.
+ * Uses GeoTools CQL library for CQL2-Text parsing and Jackson with JtsModule for GeoJSON handling.
  * Supports both CQL2-Text and CQL2-JSON formats as specified in the
  * OGC CQL2 and STAC Filter Extension specifications.
  */
@@ -56,8 +52,6 @@ import java.util.List;
 public class Cql2FilterParser {
 
     private final ObjectMapper objectMapper;
-    private final GeoJSONReader geoJsonReader = new GeoJSONReader();
-    private final GeoJSONWriter geoJsonWriter = new GeoJSONWriter();
 
     /**
      * Parses a filter expression based on the specified filter language.
@@ -575,28 +569,25 @@ public class Cql2FilterParser {
     }
 
     /**
-     * Parses a GeoJSON geometry from a JsonNode using jts2geojson library.
+     * Parses a GeoJSON geometry from a JsonNode using Jackson with JtsModule.
      */
     private Geometry parseGeoJsonGeometry(JsonNode node) {
         try {
-            String geoJsonStr = objectMapper.writeValueAsString(node);
-            GeoJSON geoJson = GeoJSONFactory.create(geoJsonStr);
-            return geoJsonReader.read(geoJson);
+            return objectMapper.treeToValue(node, Geometry.class);
         } catch (Exception e) {
             throw new IllegalArgumentException("Cannot parse GeoJSON geometry: " + node, e);
         }
     }
 
     /**
-     * Converts a JTS Geometry to GeoJSON string using jts2geojson library.
+     * Converts a JTS Geometry to GeoJSON string using Jackson with JtsModule.
      */
     public String geometryToGeoJson(Geometry geometry) {
         if (geometry == null) {
             return null;
         }
         try {
-            GeoJSON geoJson = geoJsonWriter.write(geometry);
-            return objectMapper.writeValueAsString(geoJson);
+            return objectMapper.writeValueAsString(geometry);
         } catch (Exception e) {
             throw new IllegalArgumentException("Cannot convert geometry to GeoJSON", e);
         }

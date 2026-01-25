@@ -500,7 +500,7 @@ public class PgStacRepositoryImpl implements StacRepository {
         }
 
         // Context - check both STAC Context Extension format and pgSTAC/OGC format
-        Context.ContextBuilder contextBuilder = Context.builder();
+        var contextBuilder = Context.builder();
         boolean hasContext = false;
 
         if (rootNode.has("context")) {
@@ -774,43 +774,19 @@ public class PgStacRepositoryImpl implements StacRepository {
 
     @Override
     public BulkOperationResult bulkInsert(String collectionId, List<Item> items) {
-        if (collectionId == null || collectionId.isBlank()) {
-            throw new IllegalArgumentException("Collection ID cannot be null or empty");
-        }
-        if (items == null || items.isEmpty()) {
-            return BulkOperationResult.empty();
-        }
-
-        log.debug("Bulk inserting {} items into collection {}", items.size(), collectionId);
-        BulkOperationResult result = BulkOperationResult.builder()
-                .items(new ArrayList<>())
-                .errors(new ArrayList<>())
-                .build();
-
-        for (Item item : items) {
-            try {
-                item.setCollection(collectionId);
-                String itemJson = functionMapper.buildItemJson(item);
-
-                // Use upsert_item for bulk insert (official pgstac returns VOID)
-                jdbcTemplate.execute(
-                        String.format("SELECT pgstac.upsert_item(CAST('%s' AS jsonb))",
-                                itemJson.replace("'", "''"))
-                );
-                result.addSuccess(item.getId());
-            } catch (Exception e) {
-                log.warn("Failed to insert item {}: {}", item.getId(), e.getMessage());
-                result.addFailure(String.format("Item %s: %s", item.getId(), e.getMessage()));
-            }
-        }
-
-        log.info("Bulk insert completed: {} succeeded, {} failed",
-                result.getSuccess(), result.getFailed());
-        return result;
+        return bulkUpsert(collectionId, items, "insert");
     }
 
     @Override
     public BulkOperationResult bulkUpdate(String collectionId, List<Item> items) {
+        return bulkUpsert(collectionId, items, "update");
+    }
+
+    /**
+     * Internal method that performs bulk upsert operations.
+     * Both insert and update use pgSTAC's upsert_item function.
+     */
+    private BulkOperationResult bulkUpsert(String collectionId, List<Item> items, String operation) {
         if (collectionId == null || collectionId.isBlank()) {
             throw new IllegalArgumentException("Collection ID cannot be null or empty");
         }
@@ -818,7 +794,7 @@ public class PgStacRepositoryImpl implements StacRepository {
             return BulkOperationResult.empty();
         }
 
-        log.debug("Bulk updating {} items in collection {}", items.size(), collectionId);
+        log.debug("Bulk {} {} items in collection {}", operation, items.size(), collectionId);
         BulkOperationResult result = BulkOperationResult.builder()
                 .items(new ArrayList<>())
                 .errors(new ArrayList<>())
@@ -829,20 +805,20 @@ public class PgStacRepositoryImpl implements StacRepository {
                 item.setCollection(collectionId);
                 String itemJson = functionMapper.buildItemJson(item);
 
-                // Use upsert_item for bulk update (official pgstac returns VOID)
+                // Use upsert_item for both insert and update (official pgstac returns VOID)
                 jdbcTemplate.execute(
                         String.format("SELECT pgstac.upsert_item(CAST('%s' AS jsonb))",
                                 itemJson.replace("'", "''"))
                 );
                 result.addSuccess(item.getId());
             } catch (Exception e) {
-                log.warn("Failed to update item {}: {}", item.getId(), e.getMessage());
+                log.warn("Failed to {} item {}: {}", operation, item.getId(), e.getMessage());
                 result.addFailure(String.format("Item %s: %s", item.getId(), e.getMessage()));
             }
         }
 
-        log.info("Bulk update completed: {} succeeded, {} failed",
-                result.getSuccess(), result.getFailed());
+        log.info("Bulk {} completed: {} succeeded, {} failed",
+                operation, result.getSuccess(), result.getFailed());
         return result;
     }
 

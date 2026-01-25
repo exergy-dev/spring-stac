@@ -167,7 +167,7 @@ public class CollectionRowMapper implements RowMapper<Collection> {
         // Spatial extent
         if (extentNode.has("spatial")) {
             JsonNode spatialNode = extentNode.get("spatial");
-            SpatialExtent.SpatialExtentBuilder spatialBuilder = SpatialExtent.builder();
+            var spatialBuilder = SpatialExtent.builder();
 
             if (spatialNode.has("bbox")) {
                 JsonNode bboxArrayNode = spatialNode.get("bbox");
@@ -189,7 +189,7 @@ public class CollectionRowMapper implements RowMapper<Collection> {
         // Temporal extent
         if (extentNode.has("temporal")) {
             JsonNode temporalNode = extentNode.get("temporal");
-            TemporalExtent.TemporalExtentBuilder temporalBuilder = TemporalExtent.builder();
+            var temporalBuilder = TemporalExtent.builder();
 
             if (temporalNode.has("interval")) {
                 JsonNode intervalArrayNode = temporalNode.get("interval");

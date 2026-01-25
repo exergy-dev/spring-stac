@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.stac.model.AggregationRequest;
 import org.stac.model.AggregationResponse;
+import org.stac.model.BoundingBox;
 import org.stac.service.StacService;
 
 import java.util.List;
@@ -63,20 +64,10 @@ public class AggregateController {
         log.debug("Received GET aggregate request: collections={}, datetime={}, bbox={}, aggregations={}",
                 collections, datetime, bbox, aggregations);
 
-        // Parse bbox string to double array if provided
-        double[] bboxArray = null;
-        if (bbox != null && !bbox.isBlank()) {
-            String[] parts = bbox.split(",");
-            bboxArray = new double[parts.length];
-            for (int i = 0; i < parts.length; i++) {
-                bboxArray[i] = Double.parseDouble(parts[i].trim());
-            }
-        }
-
         AggregationRequest request = AggregationRequest.builder()
                 .collections(collections)
                 .datetime(datetime)
-                .bbox(bboxArray)
+                .bbox(BoundingBox.parseToArray(bbox))
                 .aggregations(aggregations)
                 .build();
 

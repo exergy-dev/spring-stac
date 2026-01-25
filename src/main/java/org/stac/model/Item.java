@@ -2,16 +2,12 @@ package org.stac.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.locationtech.jts.geom.Geometry;
-import org.stac.util.GeometryDeserializer;
-import org.stac.util.GeometrySerializer;
 
 import java.util.List;
 import java.util.Map;
@@ -60,8 +56,6 @@ public class Item {
      * GeoJSON Geometry object as defined in RFC 7946.
      */
     @JsonProperty("geometry")
-    @JsonSerialize(using = GeometrySerializer.class)
-    @JsonDeserialize(using = GeometryDeserializer.class)
     private Geometry geometry;
 
     /**
